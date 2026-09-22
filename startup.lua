@@ -24,17 +24,20 @@ local stopRequested = false
 
 local SEGMENT_SIZE = 960
 
--- Safely clears the speaker block's internal buffer
+-- Flushes the speaker's internal hardware buffer by broadcasting digital silence
 local function clearSpeakerBuffer()
-    if socket.clear then
-        socket.clear()
-    elseif socket.stop then
-        socket.stop()
+    local silentSegment = {}
+    for i = 1, SEGMENT_SIZE do
+        silentSegment[i] = 0
+    end
+    -- Push several silent frames to overwrite and empty the hardware audio queue
+    for _ = 1, 10 do
+        socket.route(silentSegment, 1)
     end
 end
 
 local function playURL(trackUrl)
-    -- Wipe any leftover audio sitting in the speaker before starting
+    -- Flush existing buffer before playing
     clearSpeakerBuffer()
 
     local response, err = http.get(trackUrl, nil, true)
@@ -64,9 +67,8 @@ local function playURL(trackUrl)
     end
 
     while true do
-        -- Cut audio and break instantly if stop was requested
+        -- Cut audio and exit instantly if stop command was given
         if stopRequested then
-            clearSpeakerBuffer()
             break
         end
 
@@ -83,7 +85,7 @@ local function playURL(trackUrl)
         sleep(0)
     end
 
-    -- Clear remaining buffer state upon exit
+    -- Overwrite remaining buffer with silence when stopped
     clearSpeakerBuffer()
     response.close()
 end
@@ -98,7 +100,6 @@ local function audioManager()
             print("\nNow playing: " .. currentSong .. (isLooping and " (Looping)" or ""))
             playURL(trackUrl)
 
-            -- If the song finishes naturally and loop is disabled, stop playback
             if not stopRequested and not isLooping then
                 isPlaying = false
                 print("Playback finished.")
@@ -132,7 +133,7 @@ local function commandListener()
                 isPlaying = false
                 isLooping = false
                 clearSpeakerBuffer()
-                print("Playback stopped. Microphone clear.")
+                print("Playback stopped. Speaker buffer cleared.")
 
             elseif cmd == "loop" and arg ~= "" then
                 local songKey = arg:lower()
